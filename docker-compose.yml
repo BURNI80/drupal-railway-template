@@ -1,0 +1,51 @@
+# Local development stack — mirrors the Railway topology.
+# Usage:
+#   docker compose up --build
+#   open http://localhost:8080
+#
+# Admin password comes from .env (see .env.example).
+
+services:
+  drupal:
+    build: .
+    image: drupal-railway:local
+    ports:
+      - "8080:80"
+    environment:
+      PGHOST: postgres
+      PGPORT: "5432"
+      PGUSER: postgres
+      PGPASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      PGDATABASE: railway
+      DRUPAL_HASH_SALT: local-dev-salt-not-secret
+      DRUPAL_SITE_NAME: ${DRUPAL_SITE_NAME:-My Drupal Site}
+      DRUPAL_SITE_MAIL: ${DRUPAL_SITE_MAIL:-admin@example.com}
+      DRUPAL_ADMIN_USER: ${DRUPAL_ADMIN_USER:-admin}
+      DRUPAL_ADMIN_PASSWORD: ${DRUPAL_ADMIN_PASSWORD:?set DRUPAL_ADMIN_PASSWORD in .env}
+      DRUPAL_ADMIN_MAIL: ${DRUPAL_ADMIN_MAIL:-admin@example.com}
+      DRUPAL_CRON_KEY: local-dev-cron-key
+      DRUPAL_ERROR_LEVEL: verbose
+    volumes:
+      - drupal_site:/opt/drupal/web/sites/default
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  postgres:
+    image: postgres:17.6-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: railway
+      PGDATA: /var/lib/postgresql/data/pgdata
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d railway"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+volumes:
+  drupal_site:
+  pg_data:
