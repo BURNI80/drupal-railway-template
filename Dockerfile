@@ -35,6 +35,10 @@ RUN set -eux; \
 # Serve the real composer docroot: replace Debian's default vhost with one
 # whose DocumentRoot is /opt/drupal/web.
 COPY docker/railway-site.conf /etc/apache2/sites-available/railway.conf
+# Force Apache to listen on IPv4 (0.0.0.0:80). Debian's default ports.conf binds
+# to [::]:80 which can resolve to IPv6-only, and Railway's edge proxy connects
+# over IPv4 -> 502 "connection refused".
+COPY docker/ports.conf /etc/apache2/ports.conf
 RUN a2dissite 000-default && a2ensite railway && a2enmod rewrite
 
 # PHP runtime tuning for Drupal (uploads, memory, opcache).
