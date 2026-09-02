@@ -2,7 +2,7 @@
 
 Plantilla de producción para desplegar **Drupal 11** en [Railway](https://railway.com) con un clic: instalación automática, base de datos PostgreSQL privada, archivos persistentes y healthcheck integrado. Sin asistentes web ni configuración manual — despliegas y entras con tu usuario administrador.
 
-> **English quick summary:** One-click production template for Drupal 11 on Railway. Deploys two services — a pinned `drupal:11.4.5` Apache image and PostgreSQL 17.6 — auto-installs Drupal on first boot with generated admin credentials (see the `DRUPAL_ADMIN_PASSWORD` variable), persists uploads on a volume at `sites/default`, exposes `/healthz.php` for Railway's healthcheck, and wires trusted hosts + reverse proxy automatically. Full docs below are in Spanish; see [docs/PUBLICAR.md](docs/PUBLICAR.md) for the marketplace overview text in English.
+> **English quick summary:** One-click production template for Drupal 11 on Railway. Deploys two services — a pinned `drupal:11.4.5` Apache image and PostgreSQL 17.6 — auto-installs Drupal on first boot with generated admin credentials, persists uploads on a volume at `sites/default`, exposes `/healthz.php` for Railway's healthcheck, and wires trusted hosts + reverse proxy automatically. **Key networking detail:** Apache listens on plain IPv4 and the service sets `PORT=80` so Railway routes traffic to it (see [Networking en Railway](#networking-en-railway)) — this avoids the classic 502 "connection refused" that happens when the image binds to `[::]:80` or to a port Railway isn't expecting. Full docs below are in Spanish; see [docs/PUBLICAR.md](docs/PUBLICAR.md) for the marketplace overview text in English.
 
 ---
 
@@ -25,6 +25,15 @@ Los dos servicios se comunican por la **red privada de Railway** (`postgres.rail
 
 En redespliegues posteriores el arranque ejecuta `drush updatedb` + rebuild de caché: tus subidas y contenido sobreviven porque viven en el volumen.
 
+## Networking en Railway (importante)
+
+La imagen oficial de Drupal expone Apache en el puerto **80**, pero Railway decide por dónde enrutar el tráfico público y el healthcheck según dos cosas:
+
+1. **`PORT`:** Railway inyecta una variable `PORT` con un valor por defecto (habitualmente **8080**) y enruta a ese puerto. Como Drupal escucha en el 80, hay que definir `PORT=80` explícitamente en el servicio; si no, el proxy de Railway recibe *connection refused* y devuelve **502**.
+2. **Bind de Apache:** el `ports.conf` por defecto de Debian escucha en `[::]:80`, que en algunos entornos resuelve a **IPv6-only**. El proxy de Railway conecta por **IPv4**, así que también falla con *connection refused*. Por eso el `Dockerfile` copia `docker/ports.conf` con `Listen 0.0.0.0:80`.
+
+Si despliegas y el sitio responde **502** es casi seguro una de estas dos causas; ver [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md).
+
 ## Después del despliegue
 
 1. Espera a que el servicio **Drupal** esté en verde (el primer arranque instala el sitio, tarda ~2 min).
@@ -35,15 +44,16 @@ En redespliegues posteriores el arranque ejecuta `drush updatedb` + rebuild de c
 
 ## Variables
 
-Todas vienen preconfiguradas en la plantilla — no tienes que crear ninguna:
+Todas vienen preconfiguradas en la plantilla — no tienes que crear ninguna. El servicio **Drupal** consume la base de datos por la **red privada** de Railway referenciando al servicio **Postgres**, así que si renombras el servicio Postgres solo hay que actualizar las referencias.
 
-| Variable | Valor en la plantilla | Descripción |
+| Variable (servicio Drupal) | Valor / valor de referencia | Descripción |
 |---|---|---|
-| `PGHOST` | `${{Postgres.PGHOST}}` | Host de la base de datos (red privada) |
-| `PGPORT` | `${{Postgres.PGPORT}}` | Puerto de Postgres |
-| `PGUSER` | `${{Postgres.PGUSER}}` | Usuario de Postgres |
-| `PGPASSWORD` | `${{Postgres.PGPASSWORD}}` | Contraseña de Postgres |
-| `PGDATABASE` | `${{Postgres.PGDATABASE}}` | Nombre de la base |
+| `PORT` | `80` | **Puerto donde escucha Apache** y el que Railway usa para enrutar HTTP y hacer el healthcheck. Sin esta variable Railway enruta a su puerto por defecto (8080) y da error 502. |
+| `PGHOST` | `${{Postgres.RAILWAY_PRIVATE_DOMAIN}}` | Host de la base (hostname privado `.railway.internal` del servicio Postgres) |
+| `PGPORT` | `5432` | Puerto interior de Postgres |
+| `PGUSER` | `postgres` | Usuario superusuario de Postgres |
+| `PGPASSWORD` | `${{Postgres.POSTGRES_PASSWORD}}` | Contraseña de Postgres (generada en el servicio Postgres) |
+| `PGDATABASE` | `postgres` | Nombre de la base por defecto de la imagen |
 | `DRUPAL_HASH_SALT` | generado (`secret`) | Salt de hash de Drupal |
 | `DRUPAL_CRON_KEY` | generado (`secret`) | Clave de la URL de cron |
 | `DRUPAL_ADMIN_USER` | `admin` | Usuario administrador inicial |
@@ -53,6 +63,14 @@ Todas vienen preconfiguradas en la plantilla — no tienes que crear ninguna:
 | `DRUPAL_SITE_MAIL` | `admin@example.com` | Email remitente del sitio |
 | `TRUSTED_HOSTS` | *(vacío)* | Opcional: patrones extra de hosts confiables separados por coma (regex sin delimitadores), para dominios propios |
 | `DRUPAL_ERROR_LEVEL` | `hide` | Pon `verbose` para depurar errores en pantalla |
+
+> **Nota sobre las referencias:** esta plantilla usa la imagen oficial de Postgres como servicio *image-based*. A diferencia del Postgres "gestionado" de Railway, esa imagen **no** expone automáticamente `PGHOST`/`PGPORT`/`PGUSER`/`PGDATABASE`; por eso se referencian `RAILWAY_PRIVATE_DOMAIN` y `POSTGRES_PASSWORD` y los valores fijos se asignan en la propia plantilla. Si prefieres un Postgres gestionado, cambia el servicio por el de Railway y ajusta las referencias a `${{Postgres.PGHOST}}` etc.
+
+## Credenciales
+
+- **Admin de Drupal:** usuario `DRUPAL_ADMIN_USER` (por defecto `admin`) y contraseña `DRUPAL_ADMIN_PASSWORD` (se generan por despliegue; mírala en el servicio Drupal → pestaña *Variables*).
+- **Base de datos:** solo accesible por red privada (nunca expuesta a internet). Las credenciales las resuelve automáticamente el entrypoint desde las variables `PG*` de la sección anterior.
+- Cada despliegue de la plantilla genera secretos únicos (`DRUPAL_ADMIN_PASSWORD`, `DRUPAL_HASH_SALT`, `DRUPAL_CRON_KEY`, `POSTGRES_PASSWORD`) con `${{secret(...)}}` — nada hardcodeado ni compartido entre instancias.
 
 ## Coste estimado
 
@@ -76,6 +94,7 @@ docker compose up --build
 │   ├── docker-entrypoint.sh      # arranque inteligente (espera BD, instala, actualiza)
 │   ├── settings.template.php     # settings.php que lee TODO de variables de entorno
 │   ├── healthz.php               # endpoint de salud para Railway
+│   ├── ports.conf                # obliga Apache a escuchar en IPv4 (0.0.0.0:80)
 │   ├── zz-railway.ini            # tuning PHP (memoria, uploads, opcache)
 │   └── remoteip.conf             # confianza en el proxy edge de Railway
 └── docs/
@@ -91,6 +110,7 @@ Ver [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md). Lo más común:
 
 - **El primer despliegue tarda**: la instalación corre durante el healthcheck (timeout 300 s). Si falla, revisa logs del servicio Drupal.
 - **"The provided host name is not valid"**: añade tu dominio a `TRUSTED_HOSTS` (ej. `^www\.midominio\.com$`).
+- **502 Bad Gateway**: casi siempre es el enrutado. Comprueba que existe `PORT=80` en el servicio Drupal y que Apache escucha en IPv4 (ver [Networking en Railway](#networking-en-railway-importante)).
 
 ## Licencia
 

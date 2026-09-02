@@ -74,6 +74,14 @@ Es la única ruta bajo el docroot que Drupal escribe en producción: subidas pú
 ### Un único MPM de Apache
 El módulo `mod_php` no es thread-safe: exige MPM `prefork`. El Dockerfile deshabilita explícitamente `mpm_event`/`mpm_worker` y habilita `mpm_prefork`; si la capa base trajese más de un MPM activo, Apache moriría con `AH00534: More than one MPM loaded`.
 
+### Apache escucha en IPv4 y en el puerto que Railway espera
+Dos detalles de red que evitan el clásico **502 "connection refused"**:
+
+1. **IPv4 explícito.** El `ports.conf` por defecto de Debian escucha en `[::]:80`, que en algunos entornos resuelve a IPv6-only, mientras que el proxy edge de Railway conecta por IPv4. El Dockerfile copia `docker/ports.conf` con `Listen 0.0.0.0:80` (ver `/proc/1/net/tcp` como diagnóstico: el listener de IPv4 estaba vacío).
+2. **`PORT=80`.** Railway enruta el tráfico público y el healthcheck al puerto de la variable `PORT`, cuyo valor por defecto es **8080** (no 80, que es donde escucha Drupal). Si no se define `PORT=80`, el proxy recibe *connection refused* y devuelve 502, aunque el deploy figure como `SUCCESS`. Esta variable debe venir preconfigurada en la plantilla.
+
+Ambos son requisitos para que "funcione a un clic" sin que el usuario final toque nada.
+
 ### Healthcheck honesto (`healthz.php`)
 Devuelve **200 solo cuando el sitio es plenamente usable** (PDO conecta Y `users_field_data` existe). Durante la primera instalación responde 503 y Railway sigue esperando dentro del timeout de 300 s. No arranca Drupal (bootstrap cero): es barato y funciona incluso antes de instalar.
 

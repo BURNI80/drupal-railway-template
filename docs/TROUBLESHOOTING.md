@@ -21,6 +21,20 @@ No aplastes el layout Composer de la imagen oficial: las rutas relativas del aut
 - Solución: sube el timeout (Variables → `RAILWAY_HEALTHCHECK_TIMEOUT_SEC=600`) y redespliega. Solo afecta al primer arranque; los siguientes son rápidos.
 - Si la instalación quedó a medias por un corte, borra las tablas de la base (o borra el volumen de Postgres) y redespliega para empezar limpia.
 
+## El deploy figura "SUCCESS" pero el sitio responde 502 Bad Gateway
+Síntoma típico: los logs de arranque muestran `apache2 -D FOREGROUND ... resuming normal operations` (Apache está arriba) pero toda petición HTTP da **502** con `connection refused` en los logs de red. Son dos causas casi siempre:
+
+1. **Apache escuchando en IPv6-only.** Comprueba con `railway`/Shell el listener:
+   ```bash
+   cat /proc/1/net/tcp6   # si solo hay [::]:80 LISTEN y no hay IPv4...
+   cat /proc/1/net/tcp    # vacío -> Apache NO escucha en IPv4
+   ```
+   El proxy de Railway conecta por IPv4. Solución: el `Dockerfile` ya copia `docker/ports.conf` con `Listen 0.0.0.0:80`; si lo quitaste, vuelve a ponerlo y redespliega.
+
+2. **Railway enruta a un puerto que no es el 80.** Railway usa la variable `PORT` (default `8080`) para enrutar tráfico público y healthcheck; Drupal escucha en el 80. Solución: define `PORT=80` en el servicio Drupal y redespliega.
+
+Verificado que el contenedor responde en IPv4:80, un redeploy resuelve el 502.
+
 ## "The provided host name is not valid for this server"
 Estás accediendo por un dominio que no está en `trusted_host_patterns`.
 - Con dominios `*.up.railway.app` no debería pasar (viene cubierto).
@@ -32,8 +46,9 @@ Estás accediendo por un dominio que no está en `trusted_host_patterns`.
 
 ## Error de conexión a la base de datos / "Connection refused"
 1. ¿El servicio **Postgres** está en verde? Revisa sus logs.
-2. ¿Borraste y recreaste Postgres? Las referencias `${{Postgres.*}}` siguen siendo válidas tras recreate; si cambiaste el nombre del servicio, actualiza las variables del servicio Drupal.
+2. ¿Borraste y recreaste Postgres? Las referencias del servicio Drupal (`${{Postgres.RAILWAY_PRIVATE_DOMAIN}}`, `${{Postgres.POSTGRES_PASSWORD}}`) siguen siendo válidas tras recreate siempre que el servicio conserve el nombre **Postgres**; si cambiaste el nombre, actualiza las variables del servicio Drupal.
 3. Contraseña rotada: se aplica al reiniciar Drupal (el settings lee env en runtime) — solo redespliega.
+4. Recuerda: la imagen *image-based* de Postgres **no** expone `PGHOST`/`PGUSER`/etc. La plantilla resuelve el host con `RAILWAY_PRIVATE_DOMAIN` y fija `PGUSER=postgres`, `PGDATABASE=postgres`, `PGPORT=5432`. (Con un Postgres gestionado por Railway sí existen `${{Postgres.PGHOST}}` y amigos, pero entonces hay que migrar las referencias a esos nombres.)
 
 ## Recuperar la contraseña del admin
 Abre un shell en el despliegue (Railway → servicio Drupal → ⋯ → *Shell*):

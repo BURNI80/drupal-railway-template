@@ -26,6 +26,7 @@
 
    | Variable | Valor |
    |---|---|
+   | `PORT` | `80` |
    | `PGHOST` | `${{Postgres.PGHOST}}` |
    | `PGPORT` | `${{Postgres.PGPORT}}` |
    | `PGUSER` | `${{Postgres.PGUSER}}` |
@@ -39,12 +40,15 @@
    | `DRUPAL_SITE_NAME` | `My Drupal Site` |
    | `DRUPAL_SITE_MAIL` | `admin@example.com` |
 
+   > **No olvidar `PORT=80`:** Railway enruta a la variable `PORT` (default `8080`), pero Apache escucha en el 80. Sin `PORT=80` el sitio responde 502 *connection refused* aunque el deploy figure como `SUCCESS`. Con el **Postgres gestionado** añadido vía *Add → Database → PostgreSQL*, las referencias `${{Postgres.PGHOST}}` etc. sí existen (a diferencia del Postgres *image-based*, que no las expone; para ese caso ver la variante en el README con `RAILWAY_PRIVATE_DOMAIN`).
+
 5. Generar dominio público en el servicio Drupal (Settings → Networking → Generate Domain).
 6. Adjuntar volúmenes:
    - Drupal → mount path `/opt/drupal/web/sites/default`
    - Postgres → mount path `/var/lib/postgresql/data`
 7. Desplegar y validar E2E:
    - [ ] Healthcheck verde (primer arranque ≈ 1–3 min)
+   - [ ] La URL genera 200 (¡no 502!) — si 502, revisar `PORT=80` y el bind IPv4 (ver TROUBLESHOOTING)
    - [ ] Login con `admin` / valor de `DRUPAL_ADMIN_PASSWORD`
    - [ ] Crear un artículo con imagen → subida OK
    - [ ] Redesploy (Deploy → Redeploy) → artículo e imagen siguen ahí
